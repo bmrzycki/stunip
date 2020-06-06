@@ -1,5 +1,3 @@
-#-----------------------------------------------------------------------
-
 # stunip
 Obtain an externally routable IPv4 address using the [STUN protocol](
 https://tools.ietf.org/html/rfc3489) over UDP. Small home and private
