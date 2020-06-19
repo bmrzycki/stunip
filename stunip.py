@@ -31,8 +31,8 @@ class WireFormat(object):
         self.reset()
         return struct.pack('!HH16s', 0x0001, 0, self.id)
 
-    def response(self, buf):
-        if self.ip:
+    def response(self, buf, cached=True):
+        if cached and self.ip:
             return True
 
         # The buffer must contain the following bytes: STUN Header (20),
