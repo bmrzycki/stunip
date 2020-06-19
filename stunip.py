@@ -21,13 +21,20 @@ class WireFormat(object):
         self.id = uuid.uuid4().bytes
         self.ip = ''
 
+    def reset(self):
+        self.ip = ''
+
     def request(self):
         # A STUN header contains a Message Type, Message Length, and
         # a Transaction ID. The shortest and simplest request type is
         # a Binding Request (0x0001) with a Message Length of 0.
+        self.reset()
         return struct.pack('!HH16s', 0x0001, 0, self.id)
 
     def response(self, buf):
+        if self.ip:
+            return True
+
         # The buffer must contain the following bytes: STUN Header (20),
         # MAPPED-ADDRESS Header (4), and a MAPPED-ADDRESS Value (8).
         if len(buf) < 32:
@@ -47,14 +54,13 @@ class WireFormat(object):
         #                                                                 |
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         # A Binding Response (0x0101) is the only valid STUN packet for the
-        # Binding Request we sent.  The reply must also contain the same
-        # Transaction ID.
+        # Binding Request we sent. The Transaction ID must match the ID
+        # sent in the Binding Request.
         stun_type, stun_len, stun_id = struct.unpack('!HH16s', buf[:20])
         if stun_type != 0x0101 or stun_id != self.id:
             return False
 
-        # Verify the Attribute payload size matches the STUN header
-        # Message Length.
+        # Sanity check: Attribute payload is Message Length bytes.
         attrs = buf[20:]
         if stun_len != len(attrs):
             return False
@@ -62,12 +68,14 @@ class WireFormat(object):
         #  0                   1                   2                   3
         #  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        # |         Type                  |            Length             |
+        # |             Type              |            Length             |
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        # |                             Value                            ...
+        # |                     Value (MAPPED-ADDRESS)
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        # A Binding Response has only one valid Attribute and is mandatory:
-        # MAPPED-ADDRESS (0x0001). The MAPPED-ADDRESS Value Length is 8.
+        #                                                                 |
+        # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        # A Binding Response has only one valid (and mandatory) Attribute:
+        # MAPPED-ADDRESS (0x0001) with a fixed Value Length of 8 bytes.
         attr_type, value_len = struct.unpack('!HH', attrs[:4])
         if attr_type != 0x0001 or value_len != 8:
             return False
@@ -76,21 +84,22 @@ class WireFormat(object):
         #  0                   1                   2                   3
         #  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        # |x x x x x x x x|    Family     |           Port                |
+        # |  (Alignment)  |    Family     |           Port                |
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         # |                             Address                           |
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        # The alignment byte and the Port in a MAPPED-ADDRESS Value are
-        # ignored for our use-case. The Family is always 0x01 per the RFC.
+        # The Alignment byte and the Port in a MAPPED-ADDRESS Value are
+        # ignored for our use-case. The RFC states Family is always 1.
         _, family, _, address = struct.unpack('!BBH4s', value)
-        if family != 0x01:
+        if family != 1:
             return False
 
+        # Convert byte array Address into an IPv4 dotted-decimal string.
         try:
-            # Convert binary Address into an IPv4 dotted-quad string.
             ip = socket.inet_ntoa(address)
         except:
             return False
+
         self.ip = ip
         return True
 
