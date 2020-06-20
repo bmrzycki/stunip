@@ -17,9 +17,6 @@ __status__     = "Production"
 
 class WireFormat(object):
     "https://tools.ietf.org/html/rfc3489"
-    def __init__(self):
-        pass
-
     def reset(self):
         self.id = uuid.uuid4().bytes
         self.ip = ''
