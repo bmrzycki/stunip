@@ -36,6 +36,7 @@ class WireFormat(object):
     def response(self, buf, cached=True):
         if cached and self.ip:
             return True
+        self.ip = ""
 
         # The buffer must contain the following bytes: STUN Header (20),
         # MAPPED-ADDRESS Header (4), and a MAPPED-ADDRESS Value (8).
@@ -96,8 +97,8 @@ class WireFormat(object):
         if family != 1:
             return False
 
-        # Convert byte array Address into an IPv4 dotted-decimal string.
         try:
+            # Convert Address bytes into an IPv4 dotted-decimal string.
             ip = socket.inet_ntoa(address)
         except:
             return False
