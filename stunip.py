@@ -14,6 +14,7 @@ __maintainer__ = "Brian Rzycki"
 __email__      = "brzycki@gmail.com"
 __status__     = "Production"
 
+STUN_PORT = 3478
 
 class WireFormat(object):
     "https://tools.ietf.org/html/rfc3489"
@@ -108,14 +109,14 @@ class WireFormat(object):
 
 
 class StunIP(object):
-    def __init__(self, saddr="0.0.0.0", sport=0, timeout=0.5, max_tries=10):
+    def __init__(self, saddr, timeout=0.5, max_tries=10):
         self.max_tries = max_tries
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.settimeout(timeout)
-        self.sock.bind((saddr, sport))
+        self.sock.bind((saddr, 0))  # Request dynamic source port
 
-    def ip(self, addr, port=3478):
+    def ip(self, addr, port=STUN_PORT):
         w = WireFormat()
         for _ in range(self.max_tries):
             self.sock.sendto(w.request(), (addr, port))
@@ -132,39 +133,40 @@ def main():
     p = argparse.ArgumentParser(
         description="Fetch external IPv4 address using STUN",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("-a", "--address", default="0.0.0.0:0",
-                   help="source address[:port]")
+    p.add_argument("-a", "--address", default="0.0.0.0",
+                   help="source address")
     p.add_argument("-m", "--max-tries", default=10, type=int,
                    help="max tries to send a STUN request")
     p.add_argument("-t", "--timeout", default=0.5, type=float,
                    help="socket timeout (in seconds) per request attempt")
     p.add_argument("--version", action="version",
                    version="%%(prog)s %s-%s" % (__version__, __status__))
-    p.add_argument("server", default="stun.stunprotocol.org:3478", nargs="?",
-                   help="STUN server[:port]")
+    p.add_argument("server", default="stun.stunprotocol.org:%d" % STUN_PORT,
+                   nargs="?", help="STUN server[:port]")
     a = p.parse_args()
 
-    saddr, sport = (a.address, 0)
-    if ":" in a.address:
-        saddr, sport = a.address.split(":")[:2]
-        try:
-            sport = int(sport)
-        except ValueError:
-            p.error("invalid source port '%s'" % dport)
-    daddr, dport = (a.server, 3478)
     if ":" in a.server:
         daddr, dport = a.server.split(":")[:2]
         try:
             dport = int(dport)
-        except:
+        except ValueError:
             p.error("invalid server port '%s'" % dport)
+        if not 0 < dport <= 65535:
+            p.error("server port must be 0 < %d <= 65535" % dport)
+    else:
+        daddr, dport = (a.server, STUN_PORT)
 
-    stun = StunIP(saddr, sport, a.timeout, a.max_tries)
+    if not a.address:
+        p.error("invalid empty source address")
+    if not daddr:
+        p.error("invalid empty server address")
+
+    stun = StunIP(a.address, a.timeout, a.max_tries)
     ip = stun.ip(daddr, dport)
-    if not ip:
-        return 1
-    print(ip)
-    return 0
+    if ip:
+        print(ip)
+        return 0
+    return 1
 
 
 if __name__ == "__main__":
