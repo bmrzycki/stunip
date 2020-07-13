@@ -17,6 +17,10 @@ __status__     = "Production"
 
 class WireFormat(object):
     "https://tools.ietf.org/html/rfc3489"
+    def __init__(self):
+        self.id = ""
+        self.ip = ""
+
     def reset(self):
         self.id = uuid.uuid4().bytes
         self.ip = ""
@@ -25,7 +29,7 @@ class WireFormat(object):
         # A STUN header contains a Message Type, Message Length, and
         # a Transaction ID. The shortest and simplest request type is
         # a Binding Request (0x0001) with a Message Length of 0.
-        if not getattr(self, "id", ""):
+        if not self.id:
             self.reset()
         return struct.pack("!HH16s", 0x0001, 0, self.id)
 
