@@ -17,14 +17,24 @@ __status__     = "Production"
 STUN_PORT = 3478
 
 class WireFormat(object):
-    "https://tools.ietf.org/html/rfc3489"
+    """
+    Defined by the older https://tools.ietf.org/html/rfc3489 layout. We
+    don't use the newer https://tools.ietf.org/html/rfc5389 to maximize
+    server compatibility. All RFC 5389 servers must also handle RFC 3489.
+    """
     def __init__(self):
-        self.id = ""
         self.ip = ""
+        self.id = b""
 
     def reset(self):
-        self.id = uuid.uuid4().bytes
         self.ip = ""
+
+        # Generate 15 random bits for the Transaction ID. RFC 5389 defines
+        # the first 4 bytes (network byte order) as a new field called
+        # "magic cookie". When set to 0x2112A442 the server expects the
+        # client to comprehend the newer RFC 5389 format. Prevent this
+        # by always setting the first byte to 0.
+        self.id = b"\x00" + uuid.uuid4().bytes[:15]
 
     def request(self):
         # A STUN header contains a Message Type, Message Length, and
@@ -40,7 +50,8 @@ class WireFormat(object):
         self.ip = ""
 
         # The buffer must contain the following bytes: STUN Header (20),
-        # MAPPED-ADDRESS Header (4), and a MAPPED-ADDRESS Value (8).
+        # MAPPED-ADDRESS Header (4), and a MAPPED-ADDRESS Value (8). There
+        # may be more bytes if the server uses RFC 5389.
         if len(buf) < 32:
             return False
 
@@ -84,6 +95,9 @@ class WireFormat(object):
         attr_type, value_len = struct.unpack("!HH", attrs[:4])
         if attr_type != 0x0001 or value_len != 8:
             return False
+
+        # We explicitly limit the size of value because the newer RFC 5389
+        # may add additional attributes of no use to obtaining Address.
         value = attrs[4:4+value_len]
 
         # ================ MAPPED-ADDRESS Value (8 bytes) =================
