@@ -9,7 +9,7 @@ __author__     = "Brian Rzycki"
 __copyright__  = "Copyright 2020, Brian Rzycki"
 __credits__    = [ "Brian Rzycki" ]
 __license__    = "Apache-2.0"
-__version__    = "1.0.0"
+__version__    = "1.1.0"
 __maintainer__ = "Brian Rzycki"
 __email__      = "brzycki@gmail.com"
 __status__     = "Production"
@@ -44,6 +44,7 @@ class WireFormat(object):
         if len(buf) < 32:
             return False
 
+        # ==================== STUN Header (20 bytes) =====================
         #  0                   1                   2                   3
         #  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -57,9 +58,8 @@ class WireFormat(object):
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         #                                                                 |
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        # A Binding Response (0x0101) is the only valid STUN packet for the
-        # Binding Request we sent. The Transaction ID must match the ID
-        # sent in the Binding Request.
+        # A Binding Response (0x0101) with the same Transaction ID is the
+        # only valid response to our Binding Request.
         stun_type, stun_len, stun_id = struct.unpack("!HH16s", buf[:20])
         if stun_type != 0x0101 or stun_id != self.id:
             return False
@@ -69,6 +69,7 @@ class WireFormat(object):
         if stun_len != len(attrs):
             return False
 
+        # =========== MAPPED-ADDRESS Header Attribute (4 bytes) ===========
         #  0                   1                   2                   3
         #  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -85,6 +86,7 @@ class WireFormat(object):
             return False
         value = attrs[4:4+value_len]
 
+        # ================ MAPPED-ADDRESS Value (8 bytes) =================
         #  0                   1                   2                   3
         #  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -92,8 +94,8 @@ class WireFormat(object):
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         # |                             Address                           |
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        # The Alignment byte and the Port in a MAPPED-ADDRESS Value are
-        # ignored for our use-case. The RFC states Family is always 1.
+        # Alignment and Port ignored for our case and the RFC states Family
+        # is always 1, corresponding to IPv4.
         _, family, _, address = struct.unpack("!BBH4s", value)
         if family != 1:
             return False
@@ -109,7 +111,7 @@ class WireFormat(object):
 
 
 class StunIP(object):
-    def __init__(self, saddr, timeout=0.5, max_tries=10):
+    def __init__(self, saddr="0.0.0.0", timeout=0.5, max_tries=10):
         self.max_tries = max_tries
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
