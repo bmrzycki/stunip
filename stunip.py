@@ -29,12 +29,14 @@ class WireFormat(object):
     def reset(self):
         self.ip = ""
 
-        # Generate 15 random bits for the Transaction ID. RFC 5389 defines
-        # the first 4 bytes (network byte order) as a new field called
-        # "magic cookie". When set to 0x2112A442 the server expects the
-        # client to comprehend the newer RFC 5389 format. Prevent this
-        # by always setting the first byte to 0.
-        self.id = b"\x00" + uuid.uuid4().bytes[:15]
+        # The Transaction ID is 16 bytes used to pair request/response
+        # packets. While RFC 3489 assigned no meaning to these bytes the
+        # updated RFC 5389 uses part of it to detect the new protocol.
+        # Setting bytes[0:3] == 0x2112A442 (a "magic cookie")
+        # informs the server the client supports RFC 5389. We assign
+        # id[0] = 0 and id[1:16] = random bytes ensuring we never use
+        # RFC 5389.
+        self.id = struct.pack("!B15s", 0, uuid.uuid4().bytes)
 
     def request(self):
         # A STUN header contains a Message Type, Message Length, and
