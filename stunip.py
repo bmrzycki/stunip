@@ -6,7 +6,7 @@ import sys
 import uuid
 
 __author__     = "Brian Rzycki"
-__copyright__  = "Copyright 2020, Brian Rzycki"
+__copyright__  = "Copyright 2021, Brian Rzycki"
 __credits__    = [ "Brian Rzycki" ]
 __license__    = "Apache-2.0"
 __version__    = "1.1.0"
@@ -18,13 +18,17 @@ STUN_PORT = 3478
 
 class WireFormat(object):
     """
-    Defined by the older https://tools.ietf.org/html/rfc3489 layout. We
-    don't use the newer https://tools.ietf.org/html/rfc5389 to maximize
-    server compatibility. All RFC 5389 servers must also handle RFC 3489.
+    We use the older https://tools.ietf.org/html/rfc3489 layout.
+    Newer RFCs for STUN:
+        https://tools.ietf.org/html/rfc5389
+        https://tools.ietf.org/html/rfc5769
+        https://tools.ietf.org/html/rfc5389
+    RFC 5389 requires servers to be backward compatible with RFC 3489
+    which is simpler and maximizes compatibility. We use very little
+    of the protocol to determine our external IPv4 address.
     """
     def __init__(self):
-        self.ip = ""
-        self.id = b""
+        self.reset()
 
     def reset(self):
         self.ip = ""
@@ -32,18 +36,17 @@ class WireFormat(object):
         # The Transaction ID is 16 bytes used to pair request/response
         # packets. While RFC 3489 assigned no meaning to these bytes the
         # updated RFC 5389 uses part of it to detect the new protocol.
-        # Setting bytes[0:3] == 0x2112A442 (a "magic cookie")
-        # informs the server the client supports RFC 5389. We assign
-        # id[0] = 0 and id[1:16] = random bytes ensuring we never use
-        # RFC 5389.
+        # Setting bytes[0:3] == 0x2112A442 (a "magic cookie") informs
+        # the server we support RFC 5389. Force RFC 3489 by assigning
+        # id[0] to 0 and id[1:16] to random bytes.
         self.id = struct.pack("!B15s", 0, uuid.uuid4().bytes)
 
     def request(self):
         # A STUN header contains a Message Type, Message Length, and
         # a Transaction ID. The shortest and simplest request type is
-        # a Binding Request (0x0001) with a Message Length of 0.
-        if not self.id:
-            self.reset()
+        # a Binding Request (0x0001) with a Message Length of 0 for a
+        # total of 20 bytes sent. See response() below for the header
+        # layout.
         return struct.pack("!HH16s", 0x0001, 0, self.id)
 
     def response(self, buf, cached=True):
@@ -52,8 +55,9 @@ class WireFormat(object):
         self.ip = ""
 
         # The buffer must contain the following bytes: STUN Header (20),
-        # MAPPED-ADDRESS Header (4), and a MAPPED-ADDRESS Value (8). There
-        # may be more bytes if the server uses RFC 5389.
+        # MAPPED-ADDRESS Header (4), and a MAPPED-ADDRESS Value (8). Don't
+        # check for exactly 20+4+8 (32) bytes because some servers still
+        # use RFC 5389 even after we requested the older format.
         if len(buf) < 32:
             return False
 
@@ -93,13 +97,13 @@ class WireFormat(object):
         #                                                                 |
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         # A Binding Response has only one valid (and mandatory) Attribute:
-        # MAPPED-ADDRESS (0x0001) with a fixed Value Length of 8 bytes.
+        # MAPPED-ADDRESS (0x0001) with a fixed Value length of 8 bytes.
         attr_type, value_len = struct.unpack("!HH", attrs[:4])
         if attr_type != 0x0001 or value_len != 8:
             return False
 
         # We explicitly limit the size of value because the newer RFC 5389
-        # may add additional attributes of no use to obtaining Address.
+        # may add additional data of no use to us obtaining our Address.
         value = attrs[4:4+value_len]
 
         # ================ MAPPED-ADDRESS Value (8 bytes) =================
@@ -110,15 +114,14 @@ class WireFormat(object):
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         # |                             Address                           |
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        # Alignment and Port ignored for our case and the RFC states Family
-        # is always 1, corresponding to IPv4.
+        # Alignment and Port are ignored for our use-case and Family is 1
+        # which denotes Address is an IPv4 address.
         _, family, _, address = struct.unpack("!BBH4s", value)
         if family != 1:
             return False
 
         try:
-            # Convert Address bytes into an IPv4 dotted-decimal string.
-            ip = socket.inet_ntoa(address)
+            ip = socket.inet_ntoa(address)  # Convert to IPv4 dotted-decimal.
         except:
             return False
 
@@ -132,7 +135,7 @@ class StunIP(object):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.settimeout(timeout)
-        self.sock.bind((saddr, 0))  # Request dynamic source port
+        self.sock.bind((saddr, 0))  # Request a dynamic source port.
 
     def ip(self, addr, port=STUN_PORT):
         w = WireFormat()
@@ -150,36 +153,41 @@ def main():
     import argparse
     p = argparse.ArgumentParser(
         description="Fetch external IPv4 address using STUN",
+        epilog="The default STUN port is %d." % STUN_PORT,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("-a", "--address", default="0.0.0.0",
-                   help="source address")
-    p.add_argument("-m", "--max-tries", default=10, type=int,
-                   help="max tries to send a STUN request")
-    p.add_argument("-t", "--timeout", default=0.5, type=float,
-                   help="socket timeout (in seconds) per request attempt")
-    p.add_argument("--version", action="version",
-                   version="%%(prog)s %s-%s" % (__version__, __status__))
-    p.add_argument("server", default="stun.stunprotocol.org:%d" % STUN_PORT,
-                   nargs="?", help="STUN server[:port]")
-    a = p.parse_args()
+    p.add_argument(
+        "-a", "--address", default="0.0.0.0",
+        help="source address")
+    p.add_argument(
+        "-m", "--max-tries", default=10, type=int,
+        help="max tries to send a STUN request")
+    p.add_argument(
+        "-t", "--timeout", default=0.5, type=float,
+        help="socket timeout (in seconds) per request attempt")
+    p.add_argument(
+        "-v", "--version", action="version",
+        version="%%(prog)s %s" % __version__)
+    p.add_argument(
+        "server", default="stun.stunprotocol.org:%d" % STUN_PORT,
+        nargs="?", help="STUN server[:port]")
+    args = p.parse_args()
 
-    if ":" in a.server:
-        daddr, dport = a.server.split(":")[:2]
-        try:
-            dport = int(dport)
-        except ValueError:
-            p.error("invalid server port '%s'" % dport)
-        if not 0 < dport <= 65535:
-            p.error("server port must be 0 < %d <= 65535" % dport)
-    else:
-        daddr, dport = (a.server, STUN_PORT)
-
-    if not a.address:
+    if not args.address:
         p.error("invalid empty source address")
+
+    if ":" not in args.server:
+        args.server += ":%d" % STUN_PORT
+    daddr, dport = args.server.strip().split(":")[:2]
     if not daddr:
         p.error("invalid empty server address")
+    try:
+        dport = int(dport)
+    except ValueError:
+        p.error("invalid server port '%s'" % dport)
+    if not 0 < dport <= 65535:
+        p.error("server port must be 0 < %d <= 65535" % dport)
 
-    stun = StunIP(a.address, a.timeout, a.max_tries)
+    stun = StunIP(args.address, args.timeout, args.max_tries)
     ip = stun.ip(daddr, dport)
     if ip:
         print(ip)
@@ -188,9 +196,8 @@ def main():
 
 
 if __name__ == "__main__":
-    # Suppress broken pipe exceptions.
     from signal import signal, SIGPIPE, SIG_DFL
-    signal(SIGPIPE, SIG_DFL)
+    signal(SIGPIPE, SIG_DFL)  # Suppress broken pipe exceptions.
     try:
         sys.exit(main())
     except KeyboardInterrupt:
