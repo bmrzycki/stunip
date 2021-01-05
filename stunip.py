@@ -15,6 +15,13 @@ __email__      = "brzycki@gmail.com"
 __status__     = "Production"
 
 STUN_PORT = 3478
+STUN_SERVERS = [
+    "stun.l.google.com:19305",
+    "stun1.l.google.com:19305",
+    "stun2.l.google.com:19305",
+    "stun3.l.google.com:19305",
+    "stun4.l.google.com:19305",
+]
 
 class WireFormat(object):
     """
@@ -151,6 +158,7 @@ class StunIP(object):
 
 def main():
     import argparse
+    import random
     p = argparse.ArgumentParser(
         description="Fetch external IPv4 address using STUN",
         epilog="The default STUN port is %d." % STUN_PORT,
@@ -165,10 +173,10 @@ def main():
         "-t", "--timeout", default=0.5, type=float,
         help="socket timeout (in seconds) per request attempt")
     p.add_argument(
-        "-v", "--version", action="version",
+        "-V", "--version", action="version",
         version="%%(prog)s %s" % __version__)
     p.add_argument(
-        "server", default="stun.stunprotocol.org:%d" % STUN_PORT,
+        "server", default=random.choice(STUN_SERVERS),
         nargs="?", help="STUN server[:port]")
     args = p.parse_args()
 
