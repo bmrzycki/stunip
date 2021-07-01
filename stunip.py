@@ -23,13 +23,36 @@ STUN_SERVERS = [
     "stun4.l.google.com:19305",
 ]
 
+# "The magic cookie field MUST contain the fixed value 0x2112A442 in
+#  network byte order. In RFC 3489, this field was part of the
+#  transaction ID; placing the magic cookie in this location allows
+#  a server to detect if the client will understand certain attributes
+#  that were added in this revised specification." - Section 6 RFC 5389
+MAGIC_COOKIE = [ 0x21, 0x12, 0xa4, 0x42 ]
+
+# The XOR-MAPPED-ADDRESS attribute trivially obscures the IPv4 address
+# by XORing each byte with the MAGIC_COOKIE. We need Python 2 and 3+
+# variants because 3+ changed all strings to unicode.
+if sys.version_info[0] == 2:
+    def _xor_addr(addr):
+        x = ''
+        for i in range(4):
+            x += chr(ord(addr[i]) ^ MAGIC_COOKIE[i])
+        return x
+else:
+    def _xor_addr(addr):
+        x = b''
+        for i in range(4):
+            x += struct.pack("!B", addr[i] ^ MAGIC_COOKIE[i])
+        return x
+
+
 class WireFormat(object):
     """
     We use the older https://tools.ietf.org/html/rfc3489 layout.
     Newer RFCs for STUN:
         https://tools.ietf.org/html/rfc5389
         https://tools.ietf.org/html/rfc5769
-        https://tools.ietf.org/html/rfc5389
     RFC 5389 requires servers to be backward compatible with RFC 3489
     which is simpler and maximizes compatibility. We use very little
     of the protocol to determine our external IPv4 address.
@@ -37,15 +60,21 @@ class WireFormat(object):
     def __init__(self):
         self.reset()
 
+    def _dump(self, buf):
+        # Dump the conents of a buf to stdout, useful for packet debug.
+        for b in buf:
+            sys.stdout.write("%02x " % ord(b))
+        sys.stdout.write("\n")
+
     def reset(self):
         self.ip = ""
 
         # The Transaction ID is 16 bytes used to pair request/response
         # packets. While RFC 3489 assigned no meaning to these bytes the
         # updated RFC 5389 uses part of it to detect the new protocol.
-        # Setting bytes[0:3] == 0x2112A442 (a "magic cookie") informs
-        # the server we support RFC 5389. Force RFC 3489 by assigning
-        # id[0] to 0 and id[1:16] to random bytes.
+        # Setting bytes[0:3] == MAGIC_COOKIE informs the server we
+        # support RFC 5389. Force RFC 3489 by assigning id[0] to 0 and
+        # id[1:16] to random bytes.
         self.id = struct.pack("!B15s", 0, uuid.uuid4().bytes)
 
     def request(self):
@@ -64,7 +93,7 @@ class WireFormat(object):
         # The buffer must contain the following bytes: STUN Header (20),
         # MAPPED-ADDRESS Header (4), and a MAPPED-ADDRESS Value (8). Don't
         # check for exactly 20+4+8 (32) bytes because some servers still
-        # use RFC 5389 even after we requested the older format.
+        # use RFC 5389 even after we requested the older layout.
         if len(buf) < 32:
             return False
 
@@ -103,15 +132,23 @@ class WireFormat(object):
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         #                                                                 |
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        # A Binding Response has only one valid (and mandatory) Attribute:
-        # MAPPED-ADDRESS (0x0001) with a fixed Value length of 8 bytes.
+        # RFC 3489 denotes only one, and mandatory, attribute response:
+        #   Type = 0x0001 (MAPPED-ADDRESS), Length = 8
+        # Some servers ignore our RFC 3489 request and reply using the
+        # the RFC 5389 address variant:
+        #   Type = 0x0020 (XOR-MAPPED-ADDRESS), Length = 8
+        # The IPv4 XOR variant obscures the Address and Port fields by
+        # XORing them with the MAGIC_COOKIE.
         attr_type, value_len = struct.unpack("!HH", attrs[:4])
-        if attr_type != 0x0001 or value_len != 8:
+        if value_len != 8:
             return False
-
-        # We explicitly limit the size of value because the newer RFC 5389
-        # may add additional data of no use to us obtaining our Address.
-        value = attrs[4:4+value_len]
+        if attr_type == 0x0001:
+            xor_addr = lambda x: x
+        elif attr_type == 0x0020:
+            xor_addr = _xor_addr
+        else:
+            return False
+        value = attrs[4:]
 
         # ================ MAPPED-ADDRESS Value (8 bytes) =================
         #  0                   1                   2                   3
@@ -123,16 +160,10 @@ class WireFormat(object):
         # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         # Alignment and Port are ignored for our use-case and Family is 1
         # which denotes Address is an IPv4 address.
-        _, family, _, address = struct.unpack("!BBH4s", value)
+        _, family, _, address = struct.unpack("!BBH4s", value[:8])
         if family != 1:
             return False
-
-        try:
-            ip = socket.inet_ntoa(address)  # Convert to IPv4 dotted-decimal.
-        except:
-            return False
-
-        self.ip = ip
+        self.ip = socket.inet_ntoa(xor_addr(address))
         return True
 
 
