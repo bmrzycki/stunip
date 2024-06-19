@@ -16,11 +16,11 @@ __status__     = "Production"
 
 STUN_PORT = 3478
 STUN_SERVERS = [
-    "stun.l.google.com:19305",
-    "stun1.l.google.com:19305",
-    "stun2.l.google.com:19305",
-    "stun3.l.google.com:19305",
-    "stun4.l.google.com:19305",
+    "stun.l.google.com:19302",
+    "stun1.l.google.com:19302",
+    "stun2.l.google.com:19302",
+    "stun3.l.google.com:19302",
+    "stun4.l.google.com:19302",
 ]
 
 # "The magic cookie field MUST contain the fixed value 0x2112A442 in
