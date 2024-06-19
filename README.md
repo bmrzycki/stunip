@@ -14,7 +14,7 @@ lower-end compute devices.
 
 ## Installation
 
-`stunip.py` is self-contained and only needs Python 2.7+. The simplest
+`stunip.py` is self-contained and only needs Python 3.x. The simplest
 use-case is to `git clone` this repo and run directly.
 
 ## Servers
